@@ -1,2 +1,2 @@
 # Leroux-Empirical-Likelihood
-Codes for Bayesian Empirical Likelihood with Leroux structure
+This repository contains all the codes, functions, simulation codes and data sets we use for the BEL spatial leroux model.
