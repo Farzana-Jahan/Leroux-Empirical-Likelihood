@@ -1,6 +1,6 @@
 .libPaths("c:/software/Rpackages")
 setwd("C:/R dir")
-## generate some covariates
+## generate some covariates 
 library(emplik)
 x1<- runif(2147)
 #x2<-rbinom(2147,1,0.5)
@@ -10,11 +10,10 @@ x<- cbind(1,x1)
 xbeta_true<- x%*% beta_true
 hist(xbeta_true)
 summary(xbeta_true)
+# generating response variable
 y<-exp(xbeta_true+psi_true)
 y<-round(y)
-summary(y)
-hist(y)
-hist(log(y))
+
 
 
 
@@ -38,20 +37,4 @@ for(i in 1:nrow(R))
 {
   R[i,which(W[i,]==1)]<- -1
 }
-
-# reading cancer data
-
-lung<-read_csv("lung.data.csv")
-cov<-read_csv("SA2_v2.csv")
-
-# parametric leroux
-
-library(CARBayes)
-param_fit<- S.CARleroux(formula= y~x-1,family ="poisson", fix.rho = T,rho = 0.1, W=W, burnin=100,n.sample=1000, thin= 1 )
-    
-##
-Beta_true<-c(5,10)
-# prior sd 5
-
-summary(output$Beta[1,1000:2000])
 
