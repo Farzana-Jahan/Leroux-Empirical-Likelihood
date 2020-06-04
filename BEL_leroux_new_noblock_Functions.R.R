@@ -33,15 +33,18 @@ dg<-function(tet,x)
 
 
 #functions to calculate metropolis hastings ratio for accepting the proposed parameters
-
+# log(p(beta|Data,w,tau))
+# b_mean = prior mean
 target_beta<-function(b,w,b_mean,g,tau){
   sum(log(w))-0.5*(t(b-b_mean)%*%(b-b_mean))*g*tau
 }
 
+# log(p(psi|Data,w,tau))
 target_psi<-function(w,psi,D,tau){
   sum(log(w)) -0.5*t(psi)%*%D%*%psi*tau
 }
 
+# log(p(beta|tau)) *prior*
 beta_giv_tau<-function(b,b_mean,tau,g){
   btb<-as.vector(t(b-b_mean)%*%(b-b_mean))
   btb_tau<-btb*g*tau
@@ -65,6 +68,7 @@ alpha_1<-1 # hyperparamter for tau prior
 alpha_2<-1 # hyperparamter for tau prior
 tau_inv_init<- rgamma(1,alpha_1,alpha_2) # using IG prior(1,1) for tau_inv
 tau_init<-1/tau_inv_init
+tau_init <- 1/var ##BUG##: remove line when beta-proposal issue fixed.
 g<- 10# G prior evaluated at 10 for regression coefficients' prior (Zellner prior)
 
 #initial Beta
@@ -74,6 +78,7 @@ beta_init<-beta_true
 wi_init<- 1/length(y) # y be the response variable from the data
 # initial psi
 psi_init<- psi_true
+psi_init <- 0 ##BUG##: remove line when beta-proposal issue fixed.
 #psi_init<-model_red_sed_noblk2$psi[,1000]
 var<-as.numeric(var(psi_true))
 #var<- var(y- x%*%beta_init)
@@ -82,7 +87,7 @@ var<-as.numeric(var(psi_true))
 
 # calculating MELE of Beta, beta_mele
 wi=wi_init
-beta_mele<- unname(gel(g1, x, tet0=beta_init, gradv = dg)$coefficients) # caclulating MELE of Beta using gmm package
+beta_mele<- unname(gel(g = g1, x = x, tet0=beta_init, gradv = dg)$coefficients) # caclulating MELE of Beta using gmm package
 
 # starting value of mu
 
@@ -105,24 +110,30 @@ wi<-wi_mu
 
 BEL_leroux_new<-function(y,x,n,p,var,rho,niter,beta_init, psi_init, tau_init,R, wi, sd_psi, sd_beta, sd_tau)
 {
+  
   psi_sample<- matrix(nrow= n, ncol=niter)
-  beta_sample<- matrix(nrow= p, ncol=niter)
-  tau_sample<- c()
+  beta_sample <- matrix(nrow= p, ncol=niter)
+  tau_sample <- c()
   psi_sample[,1]<- psi_init
   beta_sample[,1]<-beta_init
   tau_sample[1]<-tau_init
   beta<-beta_sample[,1]
   psi<-psi_sample[,1]
   tau<-tau_sample[1]
+  
+  # Creating matrices for proposal kernels:
+  proposal.var.beta<- sd_beta*diag(p) # specifying arbitrarily, large variance but not huge
+  t1 <- proc.time()
   # setting a loop for iteration
   for(i in 2: niter){
     
     proposal.mean.psi<- psi_sample[,i-1]
-    proposal.sd.psi<-sd_psi*diag(n)
-    psi_star<-mvrnorm(1,proposal.mean.psi,proposal.sd.psi)
-    
+    #proposal.sd.psi<-sd_psi*diag(n)
+    #psi_star<-mvrnorm(1,proposal.mean.psi,proposal.sd.psi)
+    psi_star<-(rnorm(length(proposal.mean.psi),proposal.mean.psi,sd_psi))
     # calculating updated Beta using the new psi and wi_mu from last step to find wi*
-    #functions for estimating beta taking psi and wi from each step 
+    #functions for estimating beta taking psi and wi from each step
+    ##BUG##: wi scoping issue
     g2_star<-function(tet,x, phi=psi_star)
     {
       beta1=sum(wi*(y-x%*%tet-phi))
@@ -170,36 +181,36 @@ BEL_leroux_new<-function(y,x,n,p,var,rho,niter,beta_init, psi_init, tau_init,R, 
       return(G)
     }
     
-    beta_old<-unname(gel(g2,x,beta,gradv = dg2)$coefficients)
+    beta_old<-unname(gel(g2,x,beta_mele,gradv = dg2)$coefficients)
     mu_old<-x%*%beta_old + psi
     wi_orig<-el.test(y-mu_old, 0)$wts
     wi_orig<-wi_orig/sum(wi_orig)
     
-    # checking the constraint 14
-    if(all(wi_star>0) & (sum(wi_star)-1) < 0.0001)
-    {
-      # perform a MH step for psi* in block k
+    # # checking the constraint 14
+    # if(all(wi_star>0) & (sum(wi_star)-1) < 0.0001)
+    # {
+    #   # perform a MH step for psi* in block k
       D_g_inv<-(1-rho)*diag(n)+rho*R # specify rho and neighbourhood matrix R beforehand
-      pdr_psi<- target_psi(w=wi_star, psi=psi_star, D=D_g_inv, tau=tau)-
-        target_psi(w=wi_orig, psi=psi, D=D_g_inv, tau=tau)#posterior density ratio for step 2, sampling psi
-      if(rexp(1) > -pdr_psi){
-        psi<-psi_star
-        wi<- wi_star
-        n.psi<-n.psi+1
-      }
-      
-      else{
-        psi<-psi
-        wi<-wi
-      }
-    }
-    
+    #   pdr_psi<- target_psi(w=wi_star, psi=psi_star, D=D_g_inv, tau=tau)-
+    #     target_psi(w=wi_orig, psi=psi, D=D_g_inv, tau=tau)#posterior density ratio for step 2, sampling psi
+    #   if(rexp(1) > -pdr_psi){
+    #     psi<-psi_star
+    #     wi<- wi_star
+    #     n.psi<-n.psi+1
+    #   }
+    #   
+    #   else{
+    psi<-psi
+    wi<-wi
+    n.psi<-n.psi+1
+    #   }
+    # }
+    # 
     
     psi_sample[,i]<-psi
     # Step 3 : sampling fixed effect beta
     proposal.mean.beta<- unname(gel(g2,x,beta,gradv = dg2)$coefficients)
-    proposal.var.beta<- sd_beta*diag(p) # specifying arbitrarily, large variance but not huge
-    beta_proposed<- mvrnorm(1,proposal.mean.beta,proposal.var.beta)
+    beta_proposed<- mvrnorm(1,beta,proposal.var.beta)
     wi_beta<- el.test(y-x%*%beta_proposed-psi,0)$wts
     wi_beta<- wi_beta/sum(wi_beta)
     wi_orig_2<-el.test(y-x%*%beta-psi,0)$wts
@@ -210,6 +221,7 @@ BEL_leroux_new<-function(y,x,n,p,var,rho,niter,beta_init, psi_init, tau_init,R, 
     {
       pdr_beta<-target_beta(beta_proposed,w=wi_beta,proposal.mean.beta,g=10,tau)-
         target_beta(beta,w=wi_orig_2,proposal.mean.beta,g=10,tau)# posterior density ratio for beta
+
       if(rexp(1) > -pdr_beta){
         wi<- wi_beta
         beta<-beta_proposed
@@ -233,15 +245,17 @@ BEL_leroux_new<-function(y,x,n,p,var,rho,niter,beta_init, psi_init, tau_init,R, 
       target_tau(tau,beta_sample[,i-1],beta_mele,1,1,psi_sample[,i-1],D_g_inv) # posterior density ratio
     
     
-    if(rexp(1)> -(pdr_tau+log(tau_proposed)-log(tau))) # if(rexp(1)> pdr_tau)
-    {
-      tau<-tau_proposed
-      n.tau<-n.tau+1
-    }  
+    # if(rexp(1)> -(pdr_tau+log(tau_proposed)-log(tau))) # if(rexp(1)> pdr_tau)
+    # {
+    #   tau<-tau_proposed
+    n.tau<-n.tau+1
+    # }
     
     tau_sample[i]<- tau
   }
-  
+  t2 <- proc.time()
+  t2[3] - t1[3]
+  (t2[3] - t1[3])/(niter-1)
   acceptance<- data.frame(parameter= c("beta", "psi", "tau"), 
                           acceptance_rate= c((n.beta/niter)*100, (n.psi/niter)*100,
                                              (n.tau/niter)*100))
@@ -273,10 +287,3 @@ BEL_leroux_new<-function(y,x,n,p,var,rho,niter,beta_init, psi_init, tau_init,R, 
                 effective_sample_size=ess)
   output
 }
-
-
-
-
-
-
-

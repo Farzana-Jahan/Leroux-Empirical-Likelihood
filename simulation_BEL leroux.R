@@ -1,5 +1,5 @@
-.libPaths("c:/software/Rpackages")
-setwd("C:/R dir")
+# .libPaths("c:/software/Rpackages")
+# setwd("C:/R dir")
 ## generate some covariates 
 library(emplik)
 x1<- runif(2147)
@@ -11,7 +11,8 @@ xbeta_true<- x%*% beta_true
 hist(xbeta_true)
 summary(xbeta_true)
 # generating response variable
-y<-exp(xbeta_true+psi_true)
+#y<-exp(xbeta_true+psi_true)
+y<-(xbeta_true+psi_true)
 y<-round(y)
 
 
