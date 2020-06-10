@@ -34,27 +34,6 @@ dg<-function(tet,x)
 
 #var_orig<-as.numeric(var(y- x%*%beta-psi))
 #var <- var_orig
-g2<-function(tet,x, phi=psi_sample[,i-1])
-{
-  beta1=sum(wi*(y-x%*%tet-phi))
-  beta2=(sum(wi*((y-x%*%tet-phi)^2/var)) -1)
-  beta = cbind(beta1,beta2)
-  return(beta)
-}
-
-dg2<-function(tet,x,phi=psi_sample[,i-1])
-{
-  n<-length(y)
-  xx<-t(x)%*%x
-  yx<-t(x)%*%y
-  if(length(wi)==1){
-    wi<-rep(wi,n)
-  }
-  G<-matrix(c(sum(-t(x)%*%wi)),
-            (-2*sum((t(x)%*%(wi/var))%*%(t(wi)%*%(y-x%*%tet-phi)))),nrow=2,ncol=1)
-  return(G)
-}
-
 
 
 #functions to calculate metropolis hastings ratio for accepting the proposed parameters
@@ -99,7 +78,10 @@ g<- 10# G prior evaluated at 10 for regression coefficients' prior (Zellner prio
 
 #initial Beta
 prior_mean_beta<- rep(0,p) # p is the number of regression parameters, in case of one covariate, p=2
-beta_init<- mvrnorm(1,prior_mean_beta, (1/g)*tau_inv_init*diag(p)) # MVN prior for Beta
+#beta_init<- rnorm(1,prior_mean_beta, (1/g)*tau_inv_init*diag(p))
+beta_init<- rnorm(2,prior_mean_beta, (1/g)*tau_inv_init)
+
+# MVN prior for Beta (check)
 #beta_init<-beta_true
 #beta_init<- model_fin$Beta[,1000]
 wi_init<- 1/length(y) # y be the response variable from the data
@@ -114,7 +96,7 @@ var<-as.numeric(var(psi_true))
 # calculating MELE of Beta, beta_mele
 wi=wi_init
 
-beta_mele<- unname(gel(g = g1, x = x, tet0=beta_init, gradv = dg)$coefficients) # caclulating MELE of Beta using gmm package
+beta_mele<- unname(gel(g = g1, x = x, tet0= beta_init, gradv = dg)$coefficients) # caclulating MELE of Beta using gmm package
 
 # starting value of mu
 
@@ -130,9 +112,7 @@ n.tau<- 0
 wi_mu<- el.test(y-mu_init,0)$wts # computing el weights using emplik package
 wi_mu<-wi_mu/sum(wi_mu) # sum(wi) = 1 and wi>0 constraints 
 
-
-
-
+wi<-wi_mu
 
 BEL_leroux_new_psi<-function(y,x,n,p,var,rho,niter,beta_init, psi_init, tau_init,R, wi, sd_psi, sd_beta, sd_tau)
 {
@@ -141,7 +121,7 @@ BEL_leroux_new_psi<-function(y,x,n,p,var,rho,niter,beta_init, psi_init, tau_init
   beta_sample <- matrix(nrow= p, ncol=niter)
   tau_sample <- c()
   psi_sample[,1]<- psi_init
-  beta_sample[,1]<-beta_init
+  beta_sample[,1]<-beta
   tau_sample[1]<-tau_init
   beta<-beta_sample[,1]
   psi<-psi_sample[,1]
@@ -191,8 +171,33 @@ BEL_leroux_new_psi<-function(y,x,n,p,var,rho,niter,beta_init, psi_init, tau_init
     
     # Step 3 : sampling fixed effect beta
     #var= as.numeric(var(y- x%*%beta-psi_sample[,i]))
-    proposal.mean.beta<- unname(gel(g2,x,beta,gradv = dg2)$coefficients)
-    beta_proposed<- mvrnorm(1,beta,proposal.var.beta)
+   g2<-function(tet,x, phi=psi)
+   {
+     beta1=sum(wi*(y-x%*%tet-phi))
+     beta2=(sum(wi*((y-x%*%tet-phi)^2/var)) -1)
+     beta = cbind(beta1,beta2)
+     return(beta)
+   }
+   
+   dg2<-function(tet,x,phi=psi)
+   {
+     n<-length(y)
+     xx<-t(x)%*%x
+     yx<-t(x)%*%y
+     if(length(wi)==1){
+       wi<-rep(wi,n)
+     }
+     G<-matrix(c(sum(-t(x)%*%wi)),
+               (-2*sum((t(x)%*%(wi/var))%*%(t(wi)%*%(y-x%*%tet-phi)))),nrow=2,ncol=1)
+     return(G)
+   }
+   
+   
+    #proposal.mean.beta<- unname(gel(g2,x,beta,gradv = dg2)$coefficients)
+   proposal.mean.beta<-unname(lm(y~x-1, weights = wi)$coefficients)
+   # beta_proposed<- mvrnorm(1,beta,proposal.var.beta)
+    beta_proposed<- rnorm(2,proposal.mean.beta,sd_beta)
+   # print(beta_proposed)
     wi_beta<- el.test(y-x%*%beta_proposed-psi,0)$wts
     wi_beta<- wi_beta/sum(wi_beta)
     wi_orig_2<-el.test(y-x%*%beta-psi,0)$wts
@@ -203,7 +208,7 @@ BEL_leroux_new_psi<-function(y,x,n,p,var,rho,niter,beta_init, psi_init, tau_init
     {
       pdr_beta<-target_beta(beta_proposed,w=wi_beta,proposal.mean.beta,g=10,tau)-
         target_beta(beta,w=wi_orig_2,proposal.mean.beta,g=10,tau)# posterior density ratio for beta
-      
+      #print(pdr_beta)
       if(rexp(1) > -pdr_beta){
         wi<- wi_beta
         beta<-beta_proposed
