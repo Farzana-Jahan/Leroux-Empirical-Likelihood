@@ -7,6 +7,7 @@ library(spdep)
 library(tidyverse)
 #install.packages("emplik")
 library(emplik)
+library(ape)
 
 # Functions used in the algorithm
 # Functions used in BEL leroux
@@ -86,10 +87,10 @@ beta_init<- rnorm(2,prior_mean_beta, (1/g)*tau_inv_init)
 #beta_init<- model_fin$Beta[,1000]
 wi_init<- 1/length(y) # y be the response variable from the data
 # initial psi
-psi_init<- psi_true
-#psi_init <- 0 ##BUG##: remove line when beta-proposal issue fixed.
-var<-as.numeric(var(psi_true))
-#var<- as.numeric(var(y- x%*%beta_init))
+#psi_init<- psi_true
+psi_init <- rep(0,n) ##BUG##: remove line when beta-proposal issue fixed.
+#var<-as.numeric(var(psi_true))
+var<- as.numeric(var(y- x%*%beta_init))
 ## MH algorithm for BEL leroux
 #niter= 100#  no. of iterations
 
@@ -147,7 +148,7 @@ BEL_leroux_new_psi<-function(y,x,n,p,var,rho,niter,beta_init, psi_init, tau_init
     mu_old<-x%*%beta + psi
     wi_orig<-el.test(y-mu_old, 0)$wts
     wi_orig<-wi_orig/sum(wi_orig)
-    
+  
     # # checking the constraint 14
     if(all(wi_star>0) & (sum(wi_star)-1) < 0.0001)
     {
@@ -170,7 +171,7 @@ BEL_leroux_new_psi<-function(y,x,n,p,var,rho,niter,beta_init, psi_init, tau_init
    psi_sample[,i]<-psi
     
     # Step 3 : sampling fixed effect beta
-    #var= as.numeric(var(y- x%*%beta-psi_sample[,i]))
+  
    g2<-function(tet,x, phi=psi)
    {
      beta1=sum(wi*(y-x%*%tet-phi))
@@ -192,7 +193,7 @@ BEL_leroux_new_psi<-function(y,x,n,p,var,rho,niter,beta_init, psi_init, tau_init
      return(G)
    }
    
-   
+   var= as.numeric(var(y- x%*%beta-psi_sample[,i]))
     #proposal.mean.beta<- unname(gel(g2,x,beta,gradv = dg2)$coefficients)
    proposal.mean.beta<-unname(lm(y~x-1, weights = wi)$coefficients)
    # beta_proposed<- mvrnorm(1,beta,proposal.var.beta)
