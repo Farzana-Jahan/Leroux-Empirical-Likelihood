@@ -71,10 +71,9 @@ n<- length(y) # no. of observations
 p<- dim(x)[2] # no. of covariates
 alpha_1<-1 # hyperparamter for tau prior
 alpha_2<-1 # hyperparamter for tau prior
-tau_inv_init<- rgamma(1,alpha_1,alpha_2) # using IG prior(1,1) for tau_inv
+tau_inv_init<- rgamma(1,alpha_1,alpha_2) # using IG prior(1,1) for tau_inv or sigma^2, variance parameter
 tau_init<- 1/tau_inv_init
-#tau_init<-model_fin_new2$tau[5000]
-#tau_init <- 1/var ##BUG##: remove line when beta-proposal issue fixed.
+
 g<- 10# G prior evaluated at 10 for regression coefficients' prior (Zellner prior)
 
 #initial Beta
@@ -88,8 +87,7 @@ beta_init<- rnorm(2,prior_mean_beta, (1/g)*tau_inv_init)
 wi_init<- 1/length(y) # y be the response variable from the data
 # initial psi
 #psi_init<- psi_true
-psi_init <- rep(0,n) ##BUG##: remove line when beta-proposal issue fixed.
-#var<-as.numeric(var(psi_true))
+psi_init <- rep(0,n) 
 var<- as.numeric(var(y- x%*%beta_init))
 ## MH algorithm for BEL leroux
 #niter= 100#  no. of iterations
@@ -108,6 +106,7 @@ beta<-beta_mele
 n.psi<- 0
 n.beta<- 0
 n.tau<- 0
+n.rho<-0
 # storing posterior samples
 
 wi_mu<- el.test(y-mu_init,0)$wts # computing el weights using emplik package
@@ -115,142 +114,152 @@ wi_mu<-wi_mu/sum(wi_mu) # sum(wi) = 1 and wi>0 constraints
 
 wi<-wi_mu
 
-BEL_leroux_new_psi<-function(y,x,n,p,var,rho,niter,beta_init, psi_init, tau_init,R, wi, sd_psi, sd_beta, sd_tau)
+BEL_leroux_new_rho<-function(y,x,n,p,var,rho_init,niter,beta_init, psi_init, tau_init,R, wi, sd_psi, sd_beta, sd_tau)
 {
   
   psi_sample<- matrix(nrow= n, ncol=niter)
   beta_sample <- matrix(nrow= p, ncol=niter)
   tau_sample <- c()
+  rho_sample<- c()
   psi_sample[,1]<- psi_init
   beta_sample[,1]<-beta
   tau_sample[1]<-tau_init
+  rho_sample[1]<- rho_init
   beta<-beta_sample[,1]
   psi<-psi_sample[,1]
   tau<-tau_sample[1]
-  # Creating matrices for proposal kernels:
-  proposal.var.beta<- sd_beta*diag(p) # specifying arbitrarily, large variance but not huge
-  #proposal.sd.psi<-sd_psi*diag(n)
-  t1 <- proc.time()
+  rho<- rho_sample[1]
   # setting a loop for iteration
   for(i in 2: niter){
     
-    proposal.mean.psi<- rep(0,n)
+    proposal.mean.psi<- psi_sample[,i-1]
+    proposal.sd.psi<-sd_psi*diag(n)
+    psi_star<-mvrnorm(1,proposal.mean.psi,proposal.sd.psi)
+    
+    # calculating updated Beta using the new psi and wi_mu from last step to find wi*
+    #functions for estimating beta taking psi and wi from each step 
+    g2_star<-function(tet,x, phi=psi_star)
+    {
+      beta1=sum(wi*(y-x%*%tet-phi))
+      beta2=(sum(wi*((y-x%*%tet-phi)^2/var)) -1)
+      beta = cbind(beta1,beta2)
+      return(beta)
+    }
+    
+    dg2_star<-function(tet,x,phi=psi_star)
+    {
+      n<-length(y)
+      xx<-t(x)%*%x
+      yx<-t(x)%*%y
+      if(length(wi)==1){
+        wi<-rep(wi,n)
+      }
+      G<-matrix(c(sum(-t(x)%*%wi)),
+                (-2*sum((t(x)%*%(wi/var))%*%(t(wi)%*%(y-x%*%tet-phi)))),nrow=2,ncol=1)
+      return(G)
+    }
     beta<- beta_sample[,i-1]
-    psi_star<-rnorm(length(proposal.mean.psi),proposal.mean.psi,sd_psi)
- 
-    mu_new<-x%*%beta + psi_star
+    mu_new<-x%*%beta+ psi_star
     wi_star<-el.test(y-mu_new, 0)$wts
     wi_star<-wi_star/sum(wi_star)
     
-    
-    # calculating updated Beta using the old psi and wi_mu from last step to find wi*
- 
     mu_old<-x%*%beta + psi
     wi_orig<-el.test(y-mu_old, 0)$wts
     wi_orig<-wi_orig/sum(wi_orig)
-  
-    # # checking the constraint 14
+    
+    # checking the constraint 14
     if(all(wi_star>0) & (sum(wi_star)-1) < 0.0001)
     {
-    # perform a MH step for psi* 
-    D_g_inv<-(1-rho)*diag(n)+rho*R # specify rho and neighbourhood matrix R beforehand
-    pdr_psi<- target_psi(w=wi_star, psi=psi_star, D=D_g_inv, tau=tau)/
-    target_psi(w=wi_orig, psi=psi, D=D_g_inv, tau=tau)#posterior density ratio for step 2, sampling psi
-    if(rexp(1) > -pdr_psi){
-    psi<-psi_star
-    wi<- wi_star
-    n.psi<-n.psi+1
+      # perform a MH step for psi* in block k
+      D_g_inv<-(1-rho)*diag(n)+rho*R # specify rho and neighbourhood matrix R beforehand
+      pdr_psi<- target_psi(w=wi_star, psi=psi_star, D=D_g_inv, tau=tau)-
+        target_psi(w=wi_orig, psi=psi, D=D_g_inv, tau=tau)#posterior density ratio for step 2, sampling psi
+      if(rexp(1) > -pdr_psi){
+        psi<-psi_star
+        wi<- wi_star
+        n.psi<-n.psi+1
+      }
+      
+      else{
+        psi<-psi
+        wi<-wi
+      }
     }
-       
-    else{
-    psi<-psi
-    wi<-wi
-    n.psi<-n.psi
-    }
-    }
-   psi_sample[,i]<-psi
+    
+    psi_sample[,i]<-psi
+    
+   # rho sampling
+   D_g_inv<-(1-rho)*diag(n)+rho*R 
+   rho_proposed<-runif(1,0,1)
+   D_g_inv_proposed<-(1-rho_proposed)*diag(n)+rho_proposed*R 
+   pdr_rho<- target_psi(w=wi_star, psi=psi, D=D_g_inv_proposed, tau=tau)-
+     target_psi(w=wi_orig, psi=psi, D=D_g_inv, tau=tau)
+   if(rexp(1) > -pdr_rho){
+     rho<- rho_proposed
+     n.rho<-n.rho+1
+   }
+   
+   else{
+     rho<-rho
+   }
+   
+   rho_sample[i]<- rho
     
     # Step 3 : sampling fixed effect beta
   
-   g2<-function(tet,x, phi=psi)
-   {
-     beta1=sum(wi*(y-x%*%tet-phi))
-     beta2=(sum(wi*((y-x%*%tet-phi)^2/var)) -1)
-     beta = cbind(beta1,beta2)
-     return(beta)
-   }
-   
-   dg2<-function(tet,x,phi=psi)
-   {
-     n<-length(y)
-     xx<-t(x)%*%x
-     yx<-t(x)%*%y
-     if(length(wi)==1){
-       wi<-rep(wi,n)
-     }
-     G<-matrix(c(sum(-t(x)%*%wi)),
-               (-2*sum((t(x)%*%(wi/var))%*%(t(wi)%*%(y-x%*%tet-phi)))),nrow=2,ncol=1)
-     return(G)
-   }
-   
-   var= as.numeric(var(y- x%*%beta-psi_sample[,i]))
-    #proposal.mean.beta<- unname(gel(g2,x,beta,gradv = dg2)$coefficients)
+   # Step 3 : sampling fixed effect beta
    proposal.mean.beta<-unname(lm(y~x-1, weights = wi)$coefficients)
-   # beta_proposed<- mvrnorm(1,beta,proposal.var.beta)
-    beta_proposed<- rnorm(2,proposal.mean.beta,sd_beta)
-   # print(beta_proposed)
-    wi_beta<- el.test(y-x%*%beta_proposed-psi,0)$wts
-    wi_beta<- wi_beta/sum(wi_beta)
-    wi_orig_2<-el.test(y-x%*%beta-psi,0)$wts
-    wi_orig_2<-wi_orig_2/sum(wi_orig_2)
-    
-    
-    if(all(wi_beta)>0 & (sum(wi_beta)-1)< 0.0001)
-    {
-      pdr_beta<-target_beta(beta_proposed,w=wi_beta,proposal.mean.beta,g=10,tau)-
-        target_beta(beta,w=wi_orig_2,proposal.mean.beta,g=10,tau)# posterior density ratio for beta
-      #print(pdr_beta)
-      if(rexp(1) > -pdr_beta){
-        wi<- wi_beta
-        beta<-beta_proposed
-        n.beta<-n.beta+1
-      }
-      else{ 
-        wi<-wi
-        beta<-beta
-        n.beta<-n.beta}
-    }
-    beta_sample[,i]<-beta
-    
-    # step 4 : sampling precision parameter tau
-    mean_tau<-1/rgamma(1,alpha_1,alpha_2)
-    #install.packages("truncnorm")
-    library(truncnorm)
-    tau_proposed<- exp(rnorm(1,mean= log(tau),sd=sd_tau)) # random walk 
-    
-    
-    pdr_tau<- target_tau(tau_proposed,beta_sample[,i],beta_mele,1,1,psi_sample[,i],D_g_inv)-
-      target_tau(tau,beta_sample[,i-1],beta_mele,1,1,psi_sample[,i-1],D_g_inv) # posterior density ratio
-    
-    
-    if(rexp(1)> -(pdr_tau+log(tau_proposed)-log(tau))) # if(rexp(1)> pdr_tau)
-    {
-      tau<-tau_proposed
-      n.tau<-n.tau+1
-    }
-    
-    tau_sample[i]<- tau
+   proposal.var.beta<- sd_beta*diag(p) # specifying arbitrarily, large variance but not huge
+   beta_proposed<- mvrnorm(1,proposal.mean.beta,proposal.var.beta)
+   
+   wi_beta<- el.test(y-x%*%beta_proposed-psi, 0)$wts
+   wi_beta<- wi_beta/sum(wi_beta)
+   wi_orig_2<-el.test(y-x%*%beta-psi,0)$wts
+   wi_orig_2<-wi_orig_2/sum(wi_orig_2)
+   
+   
+   if(all(wi_beta)>0 & (sum(wi_beta)-1)< 0.0001)
+   {
+     pdr_beta<-target_beta(beta_proposed,w=wi_beta,proposal.mean.beta,g=10,tau)-
+       target_beta(beta,w=wi_orig_2,proposal.mean.beta,g=10,tau)# posterior density ratio for beta
+     if(rexp(1) > -pdr_beta){
+       wi<- wi_beta
+       beta<-beta_proposed
+       n.beta<-n.beta+1
+     }
+     else{ 
+       wi<-wi
+       beta<-beta
+       n.beta<-n.beta}
+   }
+   beta_sample[,i]<-beta
+   
+   # step 4 : sampling precision parameter tau
+   #mean_tau<-1/rgamma(1,alpha_1,alpha_2)
+   #install.packages("truncnorm")
+   #library(truncnorm)
+   tau_proposed<- exp(rnorm(1,mean= log(tau),sd=sd_tau)) # random walk 
+   
+   
+   pdr_tau<- target_tau(tau_proposed,beta_sample[,i],beta_mele,1,1,psi_sample[,i],D_g_inv)-
+     target_tau(tau,beta_sample[,i-1],beta_mele,1,1,psi_sample[,i-1],D_g_inv) # posterior density ratio
+   
+   
+   if(rexp(1)> -(pdr_tau+log(tau_proposed)-log(tau))) # if(rexp(1)> pdr_tau)
+   {
+     tau<-tau_proposed
+     n.tau<-n.tau+1
+   }  
+   
+   tau_sample[i]<- tau
   }
-  t2 <- proc.time()
-  t2[3] - t1[3]
-  (t2[3] - t1[3])/(niter-1)
-  acceptance<- data.frame(parameter= c("beta", "psi", "tau"), 
+  acceptance<- data.frame(parameter= c("beta", "psi", "tau", "rho"), 
                           acceptance_rate= c((n.beta/niter)*100, (n.psi/niter)*100,
-                                             (n.tau/niter)*100))
+                                             (n.tau/niter)*100,(n.rho/niter)*100))
   # effective sample size 
   # autocorrelation
    acf_psi<-c()
-  for(j in 1:2147)
+  for(j in 1:n)
   {
    acf<-acf(psi_sample[j,],plot=F)[[1]]
   n<-length(acf)
@@ -259,20 +268,22 @@ BEL_leroux_new_psi<-function(y,x,n,p,var,rho,niter,beta_init, psi_init, tau_init
   acf_beta0<-acf(beta_sample[1,],plot=F)[[1]]
   acf_beta1<-acf(beta_sample[2,],plot=F)[[1]]
   acf_tau<-acf(tau_sample,plot=F)[[1]]
+  acf_rho<-acf(rho_sample,plot=F)[[1]]
   # ess
   ess_psi<-c()
-  for(j in 1:2147)
+  for(j in 1:n)
   {
    ess_psi[j]<- niter/ (1+2*acf_psi[j])
   }
-  ess_beta0<- n.psi/ (1+2*sum(acf_beta0))
+  ess_beta0<- n.beta/ (1+2*sum(acf_beta0))
   ess_beta1<- n.beta/ (1+2*sum(acf_beta1))
   ess_tau<-n.tau/(1+2*sum(acf_tau))
-  ess<- list(ess_psi,ess_beta0, ess_beta1, ess_tau)
+  ess_rho<- n.rho/ (1+2*(acf_rho))
+  ess<- list(ess_psi,ess_beta0, ess_beta1, ess_tau,ess_rho)
   #ess<-  list(ess_beta0, ess_beta1, ess_tau)
   # tau, beta, best and worst psi
   output<- list(Beta= beta_sample,psi= psi_sample, 
-                tau= tau_sample, acceptance_rate=acceptance, 
+                tau= tau_sample,rho= rho_sample, acceptance_rate=acceptance, 
                 effective_sample_size=ess)
   output
 }
