@@ -20,9 +20,9 @@ dim(R)
 {
   # taking true rho value as 0, independent case, generate spatial random effect psi
   n=50
-  rho_true<- 0.75
+  rho_true<- 0
   D_g_inv<-(1-rho_true)*diag(n)+rho_true*R
-  sigma_true<- 1
+  sigma_true<- 0.2
   D<-solve(D_g_inv)
   set.seed(100)
   psi_true<- mvrnorm(1,rep(0,n),Sigma=D*sigma_true)
@@ -34,6 +34,7 @@ dim(R)
   # generating response variable
   y<-(xbeta_true+psi_true)
   y<-round(y)
+  
 }
 
 # PRE-MCMC:
